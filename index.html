@@ -74,6 +74,7 @@
   光の強さ<label><input id="glowR" type="range" min="0.2" max="1.4" step="0.05"></label>
   ぼかし<label><input id="blurR" type="range" min="0" max="1" step="0.05"></label>
   画面の大きさ<label><input id="sizeR" type="range" min="0.4" max="0.95" step="0.01"></label>
+  <label><input id="cfC" type="checkbox"> 天井と床にも映す（重いときはオフ）</label>
   <label><input id="debugC" type="checkbox"> 同期の状態を表示</label>
 </div>
 <div id="msg"></div>
@@ -85,7 +86,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('ambient:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('ambient:' + k, JSON.stringify(v)); } catch {} },
 };
-const cfg = { mode: store.get('mode', 'screenx'), glow: store.get('glow2', 1), blur: store.get('blur', 0.35), size: store.get('size2', 0.6) };
+const cfg = { cf: store.get('cf', true), mode: store.get('mode', 'screenx'), glow: store.get('glow2', 1), blur: store.get('blur', 0.35), size: store.get('size2', 0.6) };
 
 // 長方形(0,0)-(W,H) を四角形 q=[左上,右上,右下,左下] へ写す射影変換
 function quadMatrix(W, H, q) {
@@ -101,7 +102,7 @@ function quadMatrix(W, H, q) {
 // 背景レイヤーの定義。mirror: 映像の端を鏡写しにして継ぎ目なく外へ伸ばす
 const CROP = 0.3;
 const LAYOUTS = {
-  screenx: [{ key: 'left' }, { key: 'right' }],
+  screenx: [{ key: 'left' }, { key: 'right' }, { key: 'top', cf: true }, { key: 'bottom', cf: true }],
   ambient: [{ key: 'fill' }],
 };
 
@@ -131,6 +132,16 @@ function layout() {
       media.style.transform = (key === 'left' ? `translateX(${sw}px) scaleX(-1)` : `translateX(${w}px) scaleX(-1)`) + ` translateY(${-h * CROP / 2}px) scaleY(${1 + CROP})`;
       el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.35) brightness(${0.55 + 0.45 * cfg.glow})`;
       shade.style.background = `linear-gradient(to ${key === 'left' ? 'right' : 'left'}, rgba(0,0,0,${0.75 - 0.35 * Math.min(cfg.glow, 1)}), rgba(0,0,0,0) 85%)`;
+    } else if (key === 'top' || key === 'bottom') {
+      // 天井・床: 映像の上端/下端を鏡写し。端のc分はYouTubeのタイトルやロゴが出るので使わない
+      const m = 4, c = h * 0.12, ratio = (vw + 2 * m) / w, sh = h * Math.min(1, Math.max(0.35, (ratio - 1) / ratio + 0.15));
+      el.style.width = w + 'px'; el.style.height = sh + 'px';
+      el.style.transform = key === 'top'
+        ? quadMatrix(w, sh, [[-m, -m], [vw + m, -m], [R, T], [L, T]])
+        : quadMatrix(w, sh, [[L, B], [R, B], [vw + m, vh + m], [-m, vh + m]]);
+      media.style.transform = key === 'top' ? `translateY(${sh + c}px) scaleY(-1)` : `translateY(${h - c}px) scaleY(-1)`;
+      el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.3) brightness(${0.4 + 0.35 * cfg.glow})`;
+      shade.style.background = `linear-gradient(to ${key === 'top' ? 'bottom' : 'top'}, rgba(0,0,0,${0.85 - 0.3 * Math.min(cfg.glow, 1)}), rgba(0,0,0,.1) 90%)`;
     } else {
       // アンビエント: 主画面の後ろで画面いっぱいに引き伸ばして光らせる
       const sx = vw * 1.08 / w, sy = vh * 1.12 / h;
@@ -144,8 +155,8 @@ function layout() {
 
   const sx = cfg.mode === 'screenx';
   const pts = a => a.map(p => p.join(',')).join(' ');
-  $('ceil').setAttribute('points', sx ? pts([[0, 0], [vw, 0], [R, T], [L, T]]) : '');
-  $('floor').setAttribute('points', sx ? pts([[0, vh], [vw, vh], [R, B], [L, B]]) : '');
+  $('ceil').setAttribute('points', sx && !cfg.cf ? pts([[0, 0], [vw, 0], [R, T], [L, T]]) : '');
+  $('floor').setAttribute('points', sx && !cfg.cf ? pts([[0, vh], [vw, vh], [R, B], [L, B]]) : '');
   $('edges').innerHTML = sx ? [[0, 0, L, T], [vw, 0, R, T], [0, vh, L, B], [vw, vh, R, B]].map(([a, b, c, d]) => `<line x1="${a}" y1="${b}" x2="${c}" y2="${d}"/>`).join('') : '';
   $('main').style.boxShadow = sx ? '0 0 0 1px rgba(255,255,255,.08)' : `0 0 ${w * 0.04}px rgba(0,0,0,.6)`;
 }
@@ -154,7 +165,8 @@ addEventListener('resize', layout);
 function buildLayers() {
   const host = $('layers');
   host.innerHTML = '';
-  for (const { key } of LAYOUTS[cfg.mode]) {
+  for (const { key, cf } of LAYOUTS[cfg.mode]) {
+    if (cf && !cfg.cf) continue;
     const el = document.createElement('div');
     el.className = 'layer'; el.dataset.key = key;
     el.innerHTML = `<div class="media"><img alt=""><div></div></div><div class="shade"></div>`;
@@ -171,6 +183,14 @@ for (const [id, key, sk] of [['glowR', 'glow', 'glow2'], ['blurR', 'blur', 'blur
 for (const b of document.querySelectorAll('.seg button')) b.onclick = () => {
   if (cfg.mode === b.dataset.mode) return;
   cfg.mode = b.dataset.mode; store.set('mode', cfg.mode);
+  const t = main?.getCurrentTime?.() ?? 0, playing = main?.getPlayerState?.() === 1;
+  buildLayers();
+  if (curId) play(curId, t, playing);
+};
+$('cfC').checked = cfg.cf;
+$('cfC').onchange = e => {
+  cfg.cf = e.target.checked; store.set('cf', cfg.cf);
+  if (cfg.mode !== 'screenx') return;
   const t = main?.getCurrentTime?.() ?? 0, playing = main?.getPlayerState?.() === 1;
   buildLayers();
   if (curId) play(curId, t, playing);
