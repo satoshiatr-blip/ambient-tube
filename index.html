@@ -6,11 +6,11 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="AMBIENT">
+<meta name="apple-mobile-web-app-title" content="IMMERSE">
 <meta name="theme-color" content="#000000">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>AMBIENT TUBE</title>
+<title>IMMERSE</title>
 <style>
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: #000; color: #eee; font-family: -apple-system, "Hiragino Sans", sans-serif; overflow: hidden; }
@@ -70,7 +70,7 @@
 </div>
 <div id="settings">
   表示
-  <div class="seg"><button data-mode="screenx">スクリーンX</button><button data-mode="ambient">アンビエント</button></div>
+  <div class="seg"><button data-mode="wrap">WRAP</button><button data-mode="ambient">AMBIENT</button></div>
   光の強さ<label><input id="glowR" type="range" min="0.2" max="1.4" step="0.05"></label>
   ぼかし<label><input id="blurR" type="range" min="0" max="1" step="0.05"></label>
   画面の大きさ<label><input id="sizeR" type="range" min="0.4" max="0.95" step="0.01"></label>
@@ -86,7 +86,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem('ambient:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem('ambient:' + k, JSON.stringify(v)); } catch {} },
 };
-const cfg = { cf: store.get('cf', true), mode: store.get('mode', 'screenx'), glow: store.get('glow2', 1), blur: store.get('blur', 0.35), size: store.get('size2', 0.6) };
+const cfg = { cf: store.get('cf', true), mode: store.get('mode', 'wrap') === 'ambient' ? 'ambient' : 'wrap', glow: store.get('glow2', 1), blur: store.get('blur', 0.35), size: store.get('size2', 0.6) };
 
 // 長方形(0,0)-(W,H) を四角形 q=[左上,右上,右下,左下] へ写す射影変換
 function quadMatrix(W, H, q) {
@@ -102,7 +102,7 @@ function quadMatrix(W, H, q) {
 // 背景レイヤーの定義。mirror: 映像の端を鏡写しにして継ぎ目なく外へ伸ばす
 const CROP = 0.3;
 const LAYOUTS = {
-  screenx: [{ key: 'left' }, { key: 'right' }, { key: 'top', cf: true }, { key: 'bottom', cf: true }],
+  wrap: [{ key: 'left' }, { key: 'right' }, { key: 'top', cf: true }, { key: 'bottom', cf: true }],
   ambient: [{ key: 'fill' }],
 };
 
@@ -153,7 +153,7 @@ function layout() {
     }
   }
 
-  const sx = cfg.mode === 'screenx';
+  const sx = cfg.mode === 'wrap';
   const pts = a => a.map(p => p.join(',')).join(' ');
   $('ceil').setAttribute('points', sx && !cfg.cf ? pts([[0, 0], [vw, 0], [R, T], [L, T]]) : '');
   $('floor').setAttribute('points', sx && !cfg.cf ? pts([[0, vh], [vw, vh], [R, B], [L, B]]) : '');
@@ -190,7 +190,7 @@ for (const b of document.querySelectorAll('.seg button')) b.onclick = () => {
 $('cfC').checked = cfg.cf;
 $('cfC').onchange = e => {
   cfg.cf = e.target.checked; store.set('cf', cfg.cf);
-  if (cfg.mode !== 'screenx') return;
+  if (cfg.mode !== 'wrap') return;
   const t = main?.getCurrentTime?.() ?? 0, playing = main?.getPlayerState?.() === 1;
   buildLayers();
   if (curId) play(curId, t, playing);
