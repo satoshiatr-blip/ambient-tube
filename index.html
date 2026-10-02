@@ -153,13 +153,12 @@ function layout() {
       el.style.transform = key === 'left'
         ? quadMatrix(sw, h, [[-m, -m], [L, T], [L, B], [-m, vh + m]])
         : quadMatrix(sw, h, [[R, T], [vw + m, -m], [vw + m, vh + m], [R, B]]);
-      // 上下を切り落としてYouTubeのタイトルやロゴを壁に映さない
-      media.style.transform = (key === 'left' ? `translateX(${sw}px) scaleX(-1)` : `translateX(${w}px) scaleX(-1)`) + ` translateY(${-h * CROP / 2}px) scaleY(${1 + CROP})`;
+      media.style.transform = key === 'left' ? `translateX(${sw}px) scaleX(-1)` : `translateX(${w}px) scaleX(-1)`;
       el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.35) brightness(${0.55 + 0.45 * cfg.glow})`;
       shade.style.background = `linear-gradient(to ${key === 'left' ? 'right' : 'left'}, rgba(0,0,0,${0.75 - 0.35 * Math.min(cfg.glow, 1)}), rgba(0,0,0,0) 85%)`;
     } else if (key === 'top' || key === 'bottom') {
-      // 天井・床: 映像の上端/下端を鏡写し。端のc分はYouTubeのタイトルやロゴが出るので使わない
-      const m = 4, c = h * 0.12, ratio = (vw + 2 * m) / w, sh = h * Math.min(1, Math.max(0.35, (ratio - 1) / ratio + 0.15));
+      // 天井・床: 映像の上端/下端を鏡写しにし、主画面の縁から継ぎ目なく続ける
+      const m = 4, c = 0, ratio = (vw + 2 * m) / w, sh = h * Math.min(1, Math.max(0.35, (ratio - 1) / ratio + 0.15));
       el.style.width = w + 'px'; el.style.height = sh + 'px';
       el.style.transform = key === 'top'
         ? quadMatrix(w, sh, [[-m, -m], [vw + m, -m], [R, T], [L, T]])
