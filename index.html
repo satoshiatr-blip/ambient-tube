@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -43,6 +43,7 @@
   .seg button.sel { background: #fff; color: #000; }
   #toggle { position: fixed; top: calc(env(safe-area-inset-top) + 4px); left: 50%; transform: translateX(-50%); width: 60px; height: 20px; padding: 0; background: rgba(255,255,255,.18); border-radius: 10px; z-index: 9; }
   #msg { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: rgba(30,30,30,.95); font-size: 13px; z-index: 12; display: none; max-width: 90vw; text-align: center; }
+  #debug { position: fixed; left: 8px; bottom: 8px; font: 11px ui-monospace, monospace; color: #8f8; background: rgba(0,0,0,.6); padding: 4px 6px; border-radius: 6px; z-index: 12; display: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #888; font-size: 14px; line-height: 1.8; padding: 24px; }
 </style>
 </head>
@@ -73,8 +74,10 @@
   光の強さ<label><input id="glowR" type="range" min="0.2" max="1.4" step="0.05"></label>
   ぼかし<label><input id="blurR" type="range" min="0" max="1" step="0.05"></label>
   画面の大きさ<label><input id="sizeR" type="range" min="0.4" max="0.95" step="0.01"></label>
+  <label><input id="debugC" type="checkbox"> 同期の状態を表示</label>
 </div>
 <div id="msg"></div>
+<div id="debug"></div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -172,6 +175,8 @@ for (const b of document.querySelectorAll('.seg button')) b.onclick = () => {
   buildLayers();
   if (curId) play(curId, t, playing);
 };
+let debugOn = false;
+$('debugC').onchange = e => { debugOn = e.target.checked; $('debug').style.display = debugOn ? 'block' : 'none'; };
 $('gear').onclick = () => $('settings').classList.toggle('open');
 
 function toast(t, ms = 3500) {
@@ -220,7 +225,7 @@ async function play(id, start = 0, autoplay = true) {
     media.querySelector('img').src = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
     const slot = document.createElement('div');
     media.querySelector('div').replaceWith(slot);
-    const b = { el, playing: false };
+    const b = { el, playing: false, lead: 0.3, hold: 0, checked: true };
     b.p = new YT.Player(slot, {
       videoId: id, playerVars: { ...vars, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, mute: 1 },
       events: {
@@ -232,13 +237,13 @@ async function play(id, start = 0, autoplay = true) {
     el.classList.add('on');
     return b;
   });
-  syncTimer = setInterval(sync, 1000);
+  syncTimer = setInterval(sync, 500);
 }
 
 function onMainState(e) {
   const S = YT.PlayerState;
   if (e.data === S.PLAYING) {
-    for (const b of bgs) { b.p.seekTo?.(main.getCurrentTime(), true); b.p.playVideo?.(); }
+    for (const b of bgs) if (b.p.seekTo) seekBg(b, main.getCurrentTime());
     hideBarSoon();
     setTimeout(() => { if (bgs.some(b => !b.playing && b.p.getPlayerState?.() !== S.BUFFERING) && main.getPlayerState() === S.PLAYING) toast('この端末では背景の動画が動かないため、静止画で表示しています'); }, 5000);
   } else if (e.data === S.PAUSED || e.data === S.ENDED) {
@@ -252,13 +257,26 @@ function onMainError(e) {
   showBar();
 }
 
+// iPhoneはシークの完了が遅い。シーク後しばらくは触らず、ズレた分だけ先読み量(lead)を学習する
+function seekBg(b, t) {
+  b.p.seekTo(t + b.lead, true);
+  b.p.playVideo();
+  b.hold = performance.now() + 2500;
+  b.checked = false;
+}
+
 function sync() {
-  if (!main?.getCurrentTime || main.getPlayerState() !== YT.PlayerState.PLAYING) return;
-  const t = main.getCurrentTime();
+  if (!main?.getCurrentTime) return;
+  const playing = main.getPlayerState() === YT.PlayerState.PLAYING, t = main.getCurrentTime();
+  if (debugOn) $('debug').textContent = `主 ${t.toFixed(2)}  ` + bgs.map(b => `${b.el.dataset.key} ${(b.p.getCurrentTime?.() ?? 0).toFixed(2)}[${b.p.getPlayerState?.()}] +${b.lead.toFixed(2)}`).join('  ');
+  if (!playing) return;
+  const now = performance.now();
   for (const b of bgs) {
-    if (!b.p.getCurrentTime || b.p.getPlayerState() === YT.PlayerState.BUFFERING) continue;
-    if (!b.playing) { b.p.playVideo(); continue; }
-    if (Math.abs(t - b.p.getCurrentTime()) > 0.35) b.p.seekTo(t + 0.15, true);
+    if (!b.p.getCurrentTime || now < b.hold) continue;
+    if (!b.playing) { seekBg(b, t); continue; }
+    const d = t - b.p.getCurrentTime();
+    if (!b.checked) { b.checked = true; if (Math.abs(d) < 3) b.lead = Math.min(3, Math.max(0, b.lead + d)); }
+    if (Math.abs(d) > 0.3) seekBg(b, t);
   }
 }
 
