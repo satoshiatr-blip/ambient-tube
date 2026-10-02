@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="AMBIENT">
+<meta name="theme-color" content="#000000">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>AMBIENT TUBE</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: #000; color: #eee; font-family: -apple-system, "Hiragino Sans", sans-serif; overflow: hidden; }
+  #stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+
+  /* 背景レイヤー: 中身は w×h の動画1本。外枠の transform で壁や光に変形する */
+  .layer { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; pointer-events: none; opacity: 0; transition: opacity .8s; }
+  .layer.on { opacity: 1; }
+  .media { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform-origin: 0 0; }
+  .media img, .media > div, .media iframe { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
+  .shade { position: absolute; inset: 0; }
+
+  #room { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #main { position: absolute; background: #000; z-index: 2; }
+  #main > div, #main iframe { width: 100%; height: 100%; border: 0; display: block; }
+  #mainGlow { position: absolute; z-index: 1; pointer-events: none; }
+
+  #bar { position: fixed; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px) 10px calc(env(safe-area-inset-left) + 12px);
+         display: flex; gap: 8px; align-items: center; background: linear-gradient(rgba(0,0,0,.85), rgba(0,0,0,0)); transition: opacity .4s, transform .4s; z-index: 10; }
+  #bar.hide { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+  #url { flex: 1; min-width: 0; height: 40px; border-radius: 10px; border: 1px solid #333; background: rgba(20,20,20,.9); color: #fff; padding: 0 12px; font-size: 16px; }
+  button { height: 40px; padding: 0 14px; border-radius: 10px; border: 0; background: #2a2a2a; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  button.primary { background: #fff; color: #000; }
+  #settings { position: fixed; right: calc(env(safe-area-inset-right) + 12px); top: calc(env(safe-area-inset-top) + 60px); width: 250px; padding: 14px; border-radius: 14px; background: rgba(24,24,24,.95); z-index: 11; display: none; font-size: 13px; }
+  #settings.open { display: block; }
+  #settings label { display: block; margin: 4px 0 12px; }
+  #settings input[type=range] { width: 100%; }
+  .seg { display: flex; gap: 6px; margin: 6px 0 14px; }
+  .seg button { flex: 1; height: 34px; font-size: 13px; }
+  .seg button.sel { background: #fff; color: #000; }
+  #toggle { position: fixed; top: calc(env(safe-area-inset-top) + 4px); left: 50%; transform: translateX(-50%); width: 60px; height: 20px; padding: 0; background: rgba(255,255,255,.18); border-radius: 10px; z-index: 9; }
+  #msg { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: rgba(30,30,30,.95); font-size: 13px; z-index: 12; display: none; max-width: 90vw; text-align: center; }
+  #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #888; font-size: 14px; line-height: 1.8; padding: 24px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="layers"></div>
+  <svg id="room" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="gCeil" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#2a2a2e"/><stop offset="1" stop-color="#000"/></linearGradient>
+      <linearGradient id="gFloor" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#202024"/><stop offset="1" stop-color="#000"/></linearGradient>
+    </defs>
+    <polygon id="ceil" fill="url(#gCeil)"/>
+    <polygon id="floor" fill="url(#gFloor)"/>
+    <g id="edges" stroke="rgba(255,255,255,.10)" stroke-width="1" fill="none"></g>
+  </svg>
+  <div id="main"><div id="empty">YouTubeのURLを上に貼り付けてください<br>共有 →「リンクをコピー」で取れます</div><div id="mainHost"></div></div>
+</div>
+<button id="toggle" aria-label="メニュー"></button>
+<div id="bar">
+  <input id="url" type="url" inputmode="url" placeholder="YouTubeのURL" autocomplete="off">
+  <button id="paste">貼り付け</button>
+  <button id="load" class="primary">再生</button>
+  <button id="gear" aria-label="設定">⚙</button>
+</div>
+<div id="settings">
+  表示
+  <div class="seg"><button data-mode="screenx">スクリーンX</button><button data-mode="ambient">アンビエント</button></div>
+  光の強さ<label><input id="glowR" type="range" min="0.2" max="1.4" step="0.05"></label>
+  ぼかし<label><input id="blurR" type="range" min="0" max="1" step="0.05"></label>
+  画面の大きさ<label><input id="sizeR" type="range" min="0.4" max="0.95" step="0.01"></label>
+</div>
+<div id="msg"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem('ambient:' + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem('ambient:' + k, JSON.stringify(v)); } catch {} },
+};
+const cfg = { mode: store.get('mode', 'screenx'), glow: store.get('glow2', 1), blur: store.get('blur', 0.35), size: store.get('size2', 0.6) };
+
+// 長方形(0,0)-(W,H) を四角形 q=[左上,右上,右下,左下] へ写す射影変換
+function quadMatrix(W, H, q) {
+  const [[x0, y0], [x1, y1], [x2, y2], [x3, y3]] = q;
+  const dx1 = x1 - x2, dx2 = x3 - x2, dx3 = x0 - x1 + x2 - x3;
+  const dy1 = y1 - y2, dy2 = y3 - y2, dy3 = y0 - y1 + y2 - y3;
+  const den = dx1 * dy2 - dx2 * dy1;
+  const g = (dx3 * dy2 - dx2 * dy3) / den, h = (dx1 * dy3 - dx3 * dy1) / den;
+  const a = x1 - x0 + g * x1, b = x3 - x0 + h * x3, d = y1 - y0 + g * y1, e = y3 - y0 + h * y3;
+  return `matrix3d(${a / W},${d / W},0,${g / W},${b / H},${e / H},0,${h / H},0,0,1,0,${x0},${y0},0,1)`;
+}
+
+// 背景レイヤーの定義。mirror: 映像の端を鏡写しにして継ぎ目なく外へ伸ばす
+const CROP = 0.3;
+const LAYOUTS = {
+  screenx: [{ key: 'left' }, { key: 'right' }],
+  ambient: [{ key: 'fill' }],
+};
+
+let geo = {};
+function layout() {
+  const vw = innerWidth, vh = innerHeight;
+  const w = Math.min(vw * cfg.size, vh * cfg.size * 16 / 9), h = w * 9 / 16;
+  const L = (vw - w) / 2, T = (vh - h) / 2, R = L + w, B = T + h;
+  geo = { vw, vh, w, h, L, T, R, B };
+  const root = document.documentElement.style;
+  root.setProperty('--w', w + 'px');
+  root.setProperty('--h', h + 'px');
+  Object.assign($('main').style, { left: L + 'px', top: T + 'px', width: w + 'px', height: h + 'px' });
+
+  const blurPx = cfg.blur * w * 0.05;
+  for (const el of document.querySelectorAll('.layer')) {
+    const key = el.dataset.key, media = el.querySelector('.media'), shade = el.querySelector('.shade');
+    if (key === 'left' || key === 'right') {
+      // 切り出す幅。遠近が強いほど広く取らないと、はみ出した部分がカメラの後ろに回り描画されなくなる
+      const m = 4, ratio = (vh + 2 * m) / h, sw = w * Math.min(1, Math.max(0.35, (ratio - 1) / ratio + 0.15));
+      el.style.width = sw + 'px'; el.style.height = h + 'px';
+      // 壁: 外側の辺は画面の四隅まで、内側の辺は主画面の縁に接する
+      el.style.transform = key === 'left'
+        ? quadMatrix(sw, h, [[-m, -m], [L, T], [L, B], [-m, vh + m]])
+        : quadMatrix(sw, h, [[R, T], [vw + m, -m], [vw + m, vh + m], [R, B]]);
+      // 上下を切り落としてYouTubeのタイトルやロゴを壁に映さない
+      media.style.transform = (key === 'left' ? `translateX(${sw}px) scaleX(-1)` : `translateX(${w}px) scaleX(-1)`) + ` translateY(${-h * CROP / 2}px) scaleY(${1 + CROP})`;
+      el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.35) brightness(${0.55 + 0.45 * cfg.glow})`;
+      shade.style.background = `linear-gradient(to ${key === 'left' ? 'right' : 'left'}, rgba(0,0,0,${0.75 - 0.35 * Math.min(cfg.glow, 1)}), rgba(0,0,0,0) 85%)`;
+    } else {
+      // アンビエント: 主画面の後ろで画面いっぱいに引き伸ばして光らせる
+      const sx = vw * 1.08 / w, sy = vh * 1.12 / h;
+      el.style.width = w + 'px'; el.style.height = h + 'px';
+      el.style.transform = `translate(${vw / 2}px, ${vh / 2}px) scale(${sx}, ${sy}) translate(${-w / 2}px, ${-h / 2}px)`;
+      media.style.transform = `translateY(${-h * CROP / 2}px) scaleY(${1 + CROP})`;
+      el.style.filter = `blur(${(blurPx * 1.6 + 6) / Math.min(sx, sy)}px) saturate(1.7) brightness(${0.5 + 0.55 * cfg.glow})`;
+      shade.style.background = `radial-gradient(ellipse ${w / vw * 70 + 30}% ${h / vh * 70 + 30}% at center, rgba(0,0,0,0) 40%, rgba(0,0,0,${0.85 - 0.3 * Math.min(cfg.glow, 1)}) 100%)`;
+    }
+  }
+
+  const sx = cfg.mode === 'screenx';
+  const pts = a => a.map(p => p.join(',')).join(' ');
+  $('ceil').setAttribute('points', sx ? pts([[0, 0], [vw, 0], [R, T], [L, T]]) : '');
+  $('floor').setAttribute('points', sx ? pts([[0, vh], [vw, vh], [R, B], [L, B]]) : '');
+  $('edges').innerHTML = sx ? [[0, 0, L, T], [vw, 0, R, T], [0, vh, L, B], [vw, vh, R, B]].map(([a, b, c, d]) => `<line x1="${a}" y1="${b}" x2="${c}" y2="${d}"/>`).join('') : '';
+  $('main').style.boxShadow = sx ? '0 0 0 1px rgba(255,255,255,.08)' : `0 0 ${w * 0.04}px rgba(0,0,0,.6)`;
+}
+addEventListener('resize', layout);
+
+function buildLayers() {
+  const host = $('layers');
+  host.innerHTML = '';
+  for (const { key } of LAYOUTS[cfg.mode]) {
+    const el = document.createElement('div');
+    el.className = 'layer'; el.dataset.key = key;
+    el.innerHTML = `<div class="media"><img alt=""><div></div></div><div class="shade"></div>`;
+    host.appendChild(el);
+  }
+  for (const b of document.querySelectorAll('.seg button')) b.classList.toggle('sel', b.dataset.mode === cfg.mode);
+  layout();
+}
+
+for (const [id, key, sk] of [['glowR', 'glow', 'glow2'], ['blurR', 'blur', 'blur'], ['sizeR', 'size', 'size2']]) {
+  $(id).value = cfg[key];
+  $(id).addEventListener('input', e => { cfg[key] = +e.target.value; store.set(sk, cfg[key]); layout(); });
+}
+for (const b of document.querySelectorAll('.seg button')) b.onclick = () => {
+  if (cfg.mode === b.dataset.mode) return;
+  cfg.mode = b.dataset.mode; store.set('mode', cfg.mode);
+  const t = main?.getCurrentTime?.() ?? 0, playing = main?.getPlayerState?.() === 1;
+  buildLayers();
+  if (curId) play(curId, t, playing);
+};
+$('gear').onclick = () => $('settings').classList.toggle('open');
+
+function toast(t, ms = 3500) {
+  const m = $('msg'); m.textContent = t; m.style.display = 'block';
+  clearTimeout(toast.t); toast.t = setTimeout(() => m.style.display = 'none', ms);
+}
+
+function parseId(s) {
+  s = (s || '').trim();
+  if (/^[\w-]{11}$/.test(s)) return s;
+  try {
+    const u = new URL(s);
+    if (u.hostname.endsWith('youtu.be')) return u.pathname.slice(1, 12);
+    if (u.searchParams.get('v')) return u.searchParams.get('v').slice(0, 11);
+    const m = u.pathname.match(/\/(?:shorts|embed|live|v)\/([\w-]{11})/);
+    if (m) return m[1];
+  } catch {}
+  return null;
+}
+
+let main = null, bgs = [], apiReady = null, syncTimer = null, curId = null;
+function loadApi() {
+  return apiReady ??= new Promise(res => {
+    window.onYouTubeIframeAPIReady = res;
+    const s = document.createElement('script');
+    s.src = 'https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  });
+}
+
+async function play(id, start = 0, autoplay = true) {
+  curId = id;
+  store.set('last', id);
+  $('empty').style.display = 'none';
+  await loadApi();
+  main?.destroy(); bgs.forEach(b => b.p.destroy());
+  clearInterval(syncTimer);
+  const vars = { playsinline: 1, rel: 0, modestbranding: 1, origin: location.origin, start: Math.floor(start) };
+  $('mainHost').replaceWith(Object.assign(document.createElement('div'), { id: 'mainHost' }));
+  main = new YT.Player('mainHost', {
+    videoId: id, playerVars: { ...vars, autoplay: autoplay ? 1 : 0 },
+    events: { onStateChange: onMainState, onError: onMainError, onPlaybackRateChange: e => bgs.forEach(b => b.p.setPlaybackRate?.(e.data)) },
+  });
+  bgs = [...document.querySelectorAll('.layer')].map(el => {
+    const media = el.querySelector('.media');
+    media.querySelector('img').src = `https://i.ytimg.com/vi/${id}/hqdefault.jpg`;
+    const slot = document.createElement('div');
+    media.querySelector('div').replaceWith(slot);
+    const b = { el, playing: false };
+    b.p = new YT.Player(slot, {
+      videoId: id, playerVars: { ...vars, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, mute: 1 },
+      events: {
+        onReady: e => e.target.mute(),
+        onStateChange: e => { b.playing = e.data === YT.PlayerState.PLAYING; b.p.getIframe().style.opacity = b.playing || e.data === YT.PlayerState.PAUSED ? 1 : 0; },
+      },
+    });
+    b.p.getIframe().style.opacity = 0;
+    el.classList.add('on');
+    return b;
+  });
+  syncTimer = setInterval(sync, 1000);
+}
+
+function onMainState(e) {
+  const S = YT.PlayerState;
+  if (e.data === S.PLAYING) {
+    for (const b of bgs) { b.p.seekTo?.(main.getCurrentTime(), true); b.p.playVideo?.(); }
+    hideBarSoon();
+    setTimeout(() => { if (bgs.some(b => !b.playing && b.p.getPlayerState?.() !== S.BUFFERING) && main.getPlayerState() === S.PLAYING) toast('この端末では背景の動画が動かないため、静止画で表示しています'); }, 5000);
+  } else if (e.data === S.PAUSED || e.data === S.ENDED) {
+    for (const b of bgs) { b.p.pauseVideo?.(); b.p.seekTo?.(main.getCurrentTime(), true); }
+    showBar();
+  }
+}
+
+function onMainError(e) {
+  toast(e.data === 101 || e.data === 150 ? 'この動画は埋め込み再生が禁止されています' : 'この動画は再生できませんでした（エラー ' + e.data + '）', 5000);
+  showBar();
+}
+
+function sync() {
+  if (!main?.getCurrentTime || main.getPlayerState() !== YT.PlayerState.PLAYING) return;
+  const t = main.getCurrentTime();
+  for (const b of bgs) {
+    if (!b.p.getCurrentTime || b.p.getPlayerState() === YT.PlayerState.BUFFERING) continue;
+    if (!b.playing) { b.p.playVideo(); continue; }
+    if (Math.abs(t - b.p.getCurrentTime()) > 0.35) b.p.seekTo(t + 0.15, true);
+  }
+}
+
+let barTimer;
+function showBar() { $('bar').classList.remove('hide'); clearTimeout(barTimer); }
+function hideBarSoon() { clearTimeout(barTimer); barTimer = setTimeout(() => { $('bar').classList.add('hide'); $('settings').classList.remove('open'); }, 2500); }
+$('toggle').onclick = () => $('bar').classList.contains('hide') ? (showBar(), hideBarSoon()) : $('bar').classList.add('hide');
+
+function submit() {
+  const id = parseId($('url').value);
+  if (!id) return toast('YouTubeのURLとして読み取れませんでした');
+  $('url').blur();
+  play(id);
+}
+$('load').onclick = submit;
+$('url').addEventListener('keydown', e => { if (e.key === 'Enter') submit(); });
+$('paste').onclick = async () => {
+  try { $('url').value = await navigator.clipboard.readText(); submit(); }
+  catch { toast('貼り付けできませんでした。入力欄を長押しして貼り付けてください'); }
+};
+
+buildLayers();
+const q = new URLSearchParams(location.search);
+const startId = parseId(q.get('v') || q.get('url') || '') || store.get('last', null);
+if (startId) { $('url').value = 'https://youtu.be/' + startId; play(startId); }
+
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+</script>
+</body>
+</html>
