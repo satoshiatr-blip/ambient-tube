@@ -19,8 +19,10 @@
   /* 背景レイヤー: 中身は w×h の動画1本。外枠の transform で壁や光に変形する */
   .layer { position: absolute; left: 0; top: 0; overflow: hidden; transform-origin: 0 0; pointer-events: none; opacity: 0; transition: opacity .8s; }
   .layer.on { opacity: 1; }
+  .layer.on.dip { opacity: .3; transition: opacity .2s; }
   .media { position: absolute; left: 0; top: 0; width: var(--w); height: var(--h); transform-origin: 0 0; }
-  .media img, .media > div, .media iframe { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border: 0; }
+  .media img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .media > div, .media iframe { position: absolute; left: 0; top: 0; width: 320px; height: 180px; border: 0; transform: scale(var(--k)); transform-origin: 0 0; }
   .shade { position: absolute; inset: 0; }
 
   #room { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
@@ -56,6 +58,10 @@
   .seg button.sel { background: #fff; color: #000; }
   #msg { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: rgba(30,30,30,.95); font-size: 13px; z-index: 12; display: none; max-width: 90vw; text-align: center; }
   #debug { position: fixed; left: 8px; bottom: 8px; font: 11px ui-monospace, monospace; color: #8f8; background: rgba(0,0,0,.6); padding: 4px 6px; border-radius: 6px; z-index: 12; display: none; }
+  #rotate { position: fixed; inset: 0; z-index: 20; display: none; flex-direction: column; gap: 14px; align-items: center; justify-content: center; background: rgba(0,0,0,.82); font-size: 15px; text-align: center; line-height: 1.7; }
+  #rotate .icon { font-size: 44px; animation: tilt 2.4s ease-in-out infinite; }
+  @keyframes tilt { 0%, 30% { transform: rotate(0); } 60%, 100% { transform: rotate(-90deg); } }
+  @media (orientation: portrait) { body:not(.portrait-ok) #rotate { display: flex; } }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #888; font-size: 14px; line-height: 1.8; padding: 24px; }
 </style>
 </head>
@@ -94,6 +100,7 @@
   <label><input id="cfC" type="checkbox"> 天井と床にも映す（重いときはオフ）</label>
   <label><input id="debugC" type="checkbox"> 同期の状態を表示</label>
 </div>
+<div id="rotate"><div class="icon">📱</div><div>iPhoneを横向きにすると<br>映像に包まれます</div><button id="portraitOk">縦のまま見る</button></div>
 <div id="msg"></div>
 <div id="debug"></div>
 
@@ -132,6 +139,7 @@ function layout() {
   const root = document.documentElement.style;
   root.setProperty('--w', w + 'px');
   root.setProperty('--h', h + 'px');
+  root.setProperty('--k', w / 320);
   Object.assign($('main').style, { left: L + 'px', top: T + 'px', width: w + 'px', height: h + 'px' });
 
   const blurPx = cfg.blur * w * 0.05;
@@ -157,8 +165,13 @@ function layout() {
         ? quadMatrix(w, sh, [[-m, -m], [vw + m, -m], [R, T], [L, T]])
         : quadMatrix(w, sh, [[L, B], [R, B], [vw + m, vh + m], [-m, vh + m]]);
       media.style.transform = key === 'top' ? `translateY(${sh + c}px) scaleY(-1)` : `translateY(${h - c}px) scaleY(-1)`;
-      el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.3) brightness(${0.4 + 0.35 * cfg.glow})`;
-      shade.style.background = `linear-gradient(to ${key === 'top' ? 'bottom' : 'top'}, rgba(0,0,0,${0.85 - 0.3 * Math.min(cfg.glow, 1)}), rgba(0,0,0,.1) 90%)`;
+      if (key === 'top') {
+        el.style.filter = `blur(${blurPx * 0.5}px) saturate(1.3) brightness(${0.4 + 0.35 * cfg.glow})`;
+        shade.style.background = `linear-gradient(to bottom, rgba(0,0,0,${0.85 - 0.3 * Math.min(cfg.glow, 1)}), rgba(0,0,0,.1) 90%)`;
+      } else {
+        el.style.filter = `blur(${blurPx * 0.12 + 0.5}px) saturate(1.1) brightness(${0.45 + 0.4 * cfg.glow})`;
+        shade.style.background = `linear-gradient(to top, rgba(0,0,0,.95), rgba(0,0,0,${0.55 - 0.2 * Math.min(cfg.glow, 1)}) 55%, rgba(0,0,0,.15))`;
+      }
     } else {
       // アンビエント: 主画面の後ろで画面いっぱいに引き伸ばして光らせる
       const sx = vw * 1.08 / w, sy = vh * 1.12 / h;
@@ -212,6 +225,7 @@ $('cfC').onchange = e => {
   buildLayers();
   if (curId) play(curId, t, playing);
 };
+$('portraitOk').onclick = () => document.body.classList.add('portrait-ok');
 let debugOn = false;
 $('debugC').onchange = e => { debugOn = e.target.checked; $('debug').style.display = debugOn ? 'block' : 'none'; };
 $('gear').onclick = () => $('settings').classList.toggle('open');
@@ -269,7 +283,10 @@ async function play(id, start = 0, autoplay = true) {
       videoId: id, playerVars: { ...vars, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, mute: 1 },
       events: {
         onReady: e => e.target.mute(),
-        onStateChange: e => { b.playing = e.data === YT.PlayerState.PLAYING; b.p.getIframe().style.opacity = b.playing || e.data === YT.PlayerState.PAUSED ? 1 : 0; },
+        onStateChange: e => {
+          b.playing = e.data === YT.PlayerState.PLAYING;
+          if (b.playing) { clearTimeout(b.dipT); b.dipT = setTimeout(() => b.el.classList.remove('dip'), 300); }
+          b.p.getIframe().style.opacity = b.playing || e.data === YT.PlayerState.PAUSED ? 1 : 0; },
       },
     });
     b.p.getIframe().style.opacity = 0;
@@ -303,6 +320,8 @@ function onMainError(e) {
 
 // iPhoneはシークの完了が遅い。シーク後しばらくは触らず、ズレた分だけ先読み量(lead)を学習する
 function seekBg(b, t) {
+  b.el.classList.add('dip');
+  clearTimeout(b.dipT); b.dipT = setTimeout(() => b.el.classList.remove('dip'), 2500);
   b.p.seekTo(t + b.lead, true);
   b.p.playVideo();
   b.hold = performance.now() + 2500;
