@@ -26,7 +26,20 @@
   #room { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #main { position: absolute; background: #000; z-index: 2; }
   #main > div, #main iframe { width: 100%; height: 100%; border: 0; display: block; }
-  #mainGlow { position: absolute; z-index: 1; pointer-events: none; }
+  #lights { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity 1.8s ease;
+            background: radial-gradient(ellipse 70% 55% at 50% 0%, rgba(255,232,200,.22), rgba(255,232,200,0) 70%), rgba(0,0,0,.5); }
+  body.lit #lights { opacity: 1; transition-duration: .9s; }
+
+  /* 自前の操作パネル。最初の再生だけはYouTube側の再生ボタンを押させる（iOSは音付き再生に直接のタップが要る） */
+  #ctl { position: absolute; inset: 0; z-index: 3; display: none; }
+  #ctl.armed { display: block; }
+  #ctl .ui { position: absolute; inset: 0; background: rgba(0,0,0,.35); opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #ctl.show .ui { opacity: 1; pointer-events: auto; }
+  #ctl .row { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; gap: 28px; align-items: center; }
+  #ctl .row button { width: 52px; height: 52px; border-radius: 50%; padding: 0; background: rgba(0,0,0,.45); font-size: 15px; }
+  #ctl .row #pp { width: 68px; height: 68px; font-size: 24px; background: rgba(255,255,255,.92); color: #000; }
+  #ctl .seek { position: absolute; left: 12px; right: 12px; bottom: 8px; display: flex; gap: 10px; align-items: center; font: 12px ui-monospace, monospace; }
+  #ctl .seek input { flex: 1; accent-color: #fff; }
 
   #bar { position: fixed; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 10px) calc(env(safe-area-inset-right) + 12px) 10px calc(env(safe-area-inset-left) + 12px);
          display: flex; gap: 8px; align-items: center; background: linear-gradient(rgba(0,0,0,.85), rgba(0,0,0,0)); transition: opacity .4s, transform .4s; z-index: 10; }
@@ -41,13 +54,12 @@
   .seg { display: flex; gap: 6px; margin: 6px 0 14px; }
   .seg button { flex: 1; height: 34px; font-size: 13px; }
   .seg button.sel { background: #fff; color: #000; }
-  #toggle { position: fixed; top: calc(env(safe-area-inset-top) + 4px); left: 50%; transform: translateX(-50%); width: 60px; height: 20px; padding: 0; background: rgba(255,255,255,.18); border-radius: 10px; z-index: 9; }
   #msg { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%); padding: 10px 16px; border-radius: 10px; background: rgba(30,30,30,.95); font-size: 13px; z-index: 12; display: none; max-width: 90vw; text-align: center; }
   #debug { position: fixed; left: 8px; bottom: 8px; font: 11px ui-monospace, monospace; color: #8f8; background: rgba(0,0,0,.6); padding: 4px 6px; border-radius: 6px; z-index: 12; display: none; }
   #empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #888; font-size: 14px; line-height: 1.8; padding: 24px; }
 </style>
 </head>
-<body>
+<body class="lit">
 <div id="stage">
   <div id="layers"></div>
   <svg id="room" xmlns="http://www.w3.org/2000/svg">
@@ -59,9 +71,14 @@
     <polygon id="floor" fill="url(#gFloor)"/>
     <g id="edges" stroke="rgba(255,255,255,.10)" stroke-width="1" fill="none"></g>
   </svg>
-  <div id="main"><div id="empty">YouTubeのURLを上に貼り付けてください<br>共有 →「リンクをコピー」で取れます</div><div id="mainHost"></div></div>
+  <div id="lights"></div>
+  <div id="main"><div id="empty">YouTubeのURLを上に貼り付けてください<br>共有 →「リンクをコピー」で取れます</div><div id="mainHost"></div>
+    <div id="ctl"><div class="ui">
+      <div class="row"><button id="back" aria-label="10秒戻る">-10</button><button id="pp" aria-label="再生/一時停止">▶</button><button id="fwd" aria-label="10秒進む">+10</button></div>
+      <div class="seek"><span id="cur">0:00</span><input id="pos" type="range" min="0" max="1" step="0.1" value="0"><span id="dur">0:00</span></div>
+    </div></div>
+  </div>
 </div>
-<button id="toggle" aria-label="メニュー"></button>
 <div id="bar">
   <input id="url" type="url" inputmode="url" placeholder="YouTubeのURL" autocomplete="off">
   <button id="paste">貼り付け</button>
@@ -233,11 +250,13 @@ async function play(id, start = 0, autoplay = true) {
   $('empty').style.display = 'none';
   await loadApi();
   main?.destroy(); bgs.forEach(b => b.p.destroy());
+  $('ctl').classList.remove('armed', 'show');
+  document.body.classList.add('lit');
   clearInterval(syncTimer);
   const vars = { playsinline: 1, rel: 0, modestbranding: 1, origin: location.origin, start: Math.floor(start) };
   $('mainHost').replaceWith(Object.assign(document.createElement('div'), { id: 'mainHost' }));
   main = new YT.Player('mainHost', {
-    videoId: id, playerVars: { ...vars, autoplay: autoplay ? 1 : 0 },
+    videoId: id, playerVars: { ...vars, autoplay: autoplay ? 1 : 0, controls: 0, fs: 0, iv_load_policy: 3, disablekb: 1 },
     events: { onStateChange: onMainState, onError: onMainError, onPlaybackRateChange: e => bgs.forEach(b => b.p.setPlaybackRate?.(e.data)) },
   });
   bgs = [...document.querySelectorAll('.layer')].map(el => {
@@ -262,19 +281,24 @@ async function play(id, start = 0, autoplay = true) {
 
 function onMainState(e) {
   const S = YT.PlayerState;
+  document.body.classList.toggle('lit', e.data !== S.PLAYING && e.data !== S.BUFFERING);
+  $('pp').textContent = e.data === S.PLAYING || e.data === S.BUFFERING ? '❚❚' : '▶';
   if (e.data === S.PLAYING) {
+    $('ctl').classList.add('armed');
+    keepAwake(true);
     for (const b of bgs) if (b.p.seekTo) seekBg(b, main.getCurrentTime());
-    hideBarSoon();
+    hideUiSoon();
     setTimeout(() => { if (bgs.some(b => !b.playing && b.p.getPlayerState?.() !== S.BUFFERING) && main.getPlayerState() === S.PLAYING) toast('この端末では背景の動画が動かないため、静止画で表示しています'); }, 5000);
   } else if (e.data === S.PAUSED || e.data === S.ENDED) {
     for (const b of bgs) { b.p.pauseVideo?.(); b.p.seekTo?.(main.getCurrentTime(), true); }
-    showBar();
+    keepAwake(false);
+    showUi();
   }
 }
 
 function onMainError(e) {
   toast(e.data === 101 || e.data === 150 ? 'この動画は埋め込み再生が禁止されています' : 'この動画は再生できませんでした（エラー ' + e.data + '）', 5000);
-  showBar();
+  showUi();
 }
 
 // iPhoneはシークの完了が遅い。シーク後しばらくは触らず、ズレた分だけ先読み量(lead)を学習する
@@ -300,10 +324,50 @@ function sync() {
   }
 }
 
-let barTimer;
-function showBar() { $('bar').classList.remove('hide'); clearTimeout(barTimer); }
-function hideBarSoon() { clearTimeout(barTimer); barTimer = setTimeout(() => { $('bar').classList.add('hide'); $('settings').classList.remove('open'); }, 2500); }
-$('toggle').onclick = () => $('bar').classList.contains('hide') ? (showBar(), hideBarSoon()) : $('bar').classList.add('hide');
+const isPlaying = () => main?.getPlayerState?.() === YT.PlayerState.PLAYING;
+let uiTimer;
+function showUi() { $('bar').classList.remove('hide'); $('ctl').classList.add('show'); clearTimeout(uiTimer); }
+function hideUi() { $('bar').classList.add('hide'); $('ctl').classList.remove('show'); $('settings').classList.remove('open'); }
+function hideUiSoon() { clearTimeout(uiTimer); uiTimer = setTimeout(() => { if (isPlaying()) hideUi(); }, 2800); }
+function pokeUi() { showUi(); if (isPlaying()) hideUiSoon(); }
+// 何もない所（壁・主画面）のタップで操作パネルを出し入れ
+$('stage').addEventListener('click', e => {
+  if (e.target.closest('button, input')) return;
+  if ($('bar').classList.contains('hide')) pokeUi(); else if (isPlaying()) hideUi();
+});
+$('ctl').addEventListener('click', e => {
+  e.stopPropagation();
+  if (e.target.closest('button, input')) return pokeUi();
+  if ($('ctl').classList.contains('show')) { if (isPlaying()) hideUi(); } else pokeUi();
+});
+$('pp').onclick = () => isPlaying() ? main.pauseVideo() : main.playVideo();
+const seekAll = t => { main.seekTo(t, true); if (!isPlaying()) bgs.forEach(b => b.p.seekTo?.(t, true)); };
+$('back').onclick = () => seekAll(Math.max(0, main.getCurrentTime() - 10));
+$('fwd').onclick = () => seekAll(main.getCurrentTime() + 10);
+let dragging = false;
+const fmt = t => { t = Math.floor(t); const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, s = String(t % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${m}:${s}`; };
+$('pos').addEventListener('input', e => { dragging = true; $('cur').textContent = fmt(+e.target.value); clearTimeout(uiTimer); });
+$('pos').addEventListener('change', e => { dragging = false; seekAll(+e.target.value); pokeUi(); });
+setInterval(() => {
+  if (!main?.getDuration || !$('ctl').classList.contains('show') || dragging) return;
+  const d = main.getDuration(), t = main.getCurrentTime();
+  $('pos').max = d || 1; $('pos').value = t;
+  $('cur').textContent = fmt(t); $('dur').textContent = fmt(d);
+}, 250);
+
+// 再生中は画面をスリープさせない
+let wakeLock = null;
+async function keepAwake(on) {
+  try {
+    if (on && !wakeLock && navigator.wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => wakeLock = null); }
+    else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
+  } catch {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (isPlaying()) keepAwake(true);
+  else showUi(); // 共有でURLをコピーして戻ってきたとき、すぐ貼り付けられるように
+});
 
 function submit() {
   const id = parseId($('url').value);
